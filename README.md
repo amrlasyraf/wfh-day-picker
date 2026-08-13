@@ -43,9 +43,11 @@ data.gov.my (yearly ridership parquet, 2023-2026)
                                           dataset's own "All Stations" wildcard)
         │  ingestion/build_gold.py
         ▼
-  gold.weekday_summary            network-wide median/avg ridership by weekday,
-                                   ranked busiest-to-quietest
+  gold.weekday_summary            network-wide median/avg/stddev ridership by
+                                   weekday, ranked busiest-to-quietest
   gold.weekday_summary_by_line    same, split per line
+  gold.weekday_summary_by_zone    same, split CBD-core vs residential/suburban
+                                   (see caveat below)
         │
         ▼
   api/main.py (FastAPI)  →  web/static/index.html
@@ -57,7 +59,24 @@ that; mean is shown alongside for reference but doesn't drive the recommendation
 
 **Recommendation logic:** the busiest weekday (Mon-Fri) by median network-wide
 daily boardings is the suggested WFH day — staying home that day avoids the
-network's heaviest crowding on the days you do commute.
+network's heaviest crowding on the days you do commute. The main chart also
+shows each weekday's min-max range (a whisker), since the "busiest" day by
+median can be a thin margin over its neighbors — check the range before
+treating day-of-week rank as a hard signal.
+
+**CBD-core vs residential/suburban split:** the network-wide total blends real
+commute trips with everything else (leisure, errands, non-commute travel),
+which can hide a weekday's true commute-driven shape. `gold.weekday_summary_by_zone`
+compares a small **hand-picked** set of well-known CBD-core stations (KLCC, KL
+Sentral, Pasar Seni, Masjid Jamek, Bukit Bintang, Ampang Park, Dang Wangi,
+Merdeka, TRX) against outer residential/suburban termini (Ampang, Gombak,
+Kajang, Kwasa Damansara, Puchong Prima, Putra Heights) — see
+`ingestion/config.py`. This is **not** derived from any official land-use or
+employment dataset, just station identity; treat it as illustrative, not
+authoritative. It does surface a real split: across the full history, **CBD-core
+stations peak on Friday** while **residential/suburban stations peak on
+Wednesday** — the network-wide Wednesday recommendation is an average of two
+different underlying shapes.
 
 ## Running locally
 
@@ -79,6 +98,7 @@ python -m uvicorn api.main:app --reload --port 8001
 | `GET /api/health` | liveness + date range covered |
 | `GET /api/weekday-summary` | network-wide weekday ridership + recommended WFH day |
 | `GET /api/weekday-summary/by-line?line_name=` | same, filtered to one line |
+| `GET /api/weekday-summary/by-zone` | CBD-core vs residential/suburban weekday comparison |
 | `GET /api/lines` | LRT/MRT lines present in the data |
 | `GET /api/stations` | all LRT/MRT stations (code, name, line, mode) |
 | `GET /api/commute-summary?origin_code=&destination_code=` | weekday pattern + recommendation for one specific station pair |

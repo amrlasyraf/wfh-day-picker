@@ -21,3 +21,28 @@ LINE_BY_PREFIX = {
     "MR": ("KL Monorail Line", "Monorail"),
 }
 INCLUDED_MODES = ["LRT", "MRT"]  # Monorail excluded per project scope
+
+# Manually curated illustrative zones (NOT derived from the ridership data itself
+# -- there's no land-use/employment dataset behind this, just well-known station
+# identity). Used to check whether a commute-heavy corridor shows a sharper
+# Monday/Friday dip than the network-wide average, since there's no hourly data
+# to isolate actual AM/PM commute trips from the daily total.
+CBD_CORE_CODES = [
+    "KJ10",   # KLCC
+    "KJ15",   # KL Sentral
+    "KJ13", "AG07",   # Masjid Jamek (interchange)
+    "KJ14", "KG16",   # Pasar Seni (interchange)
+    "KJ09", "PYL20",  # Ampang Park (interchange)
+    "KG18",   # Bukit Bintang
+    "KJ12",   # Dang Wangi
+    "KG17",   # Merdeka
+    "KG20",   # Tun Razak Exchange
+]
+RESIDENTIAL_SUBURBAN_CODES = [
+    "AG18",   # Ampang
+    "KJ01",   # Gombak
+    "KG35",   # Kajang
+    "KG04",   # Kwasa Damansara
+    "SP29",   # Puchong Prima
+    "SP31",   # Putra Heights
+]

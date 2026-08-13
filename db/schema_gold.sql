@@ -17,6 +17,8 @@ SELECT
     round(median(daily_ridership)) AS median_ridership,
     min(daily_ridership) AS min_ridership,
     max(daily_ridership) AS max_ridership,
+    round(stddev(daily_ridership)) AS stddev_ridership,
+    round(100.0 * stddev(daily_ridership) / avg(daily_ridership), 1) AS coeff_variation_pct,
     count(*) AS n_days_observed,
     rank() OVER (ORDER BY median(daily_ridership) DESC) AS busiest_rank
 FROM gold.network_daily_totals

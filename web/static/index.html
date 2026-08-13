@@ -83,6 +83,8 @@
     --baseline: #383835;
     --series-base: #3987e5;
     --series-highlight: #d95926;
+    --series-cbd: #3987e5;
+    --series-residential: #199e70;
   }
   .chart-wrap { position: relative; }
   .bar { fill: var(--series-base); }
@@ -93,6 +95,10 @@
   .weekday-label { fill: var(--text-secondary); font-size: 12px; }
   .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
   .gridline { stroke: var(--gridline); stroke-width: 1; }
+
+  .legend-row { display: flex; gap: 18px; margin-bottom: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-dim); }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
 
   .tooltip {
     position: absolute;
@@ -140,7 +146,7 @@
 
   <div class="panel">
     <h2>Network-wide ridership by day of week</h2>
-    <p class="sub">Median daily boardings across all LRT + MRT stations. The busiest day is highlighted — staying home that day avoids the network's heaviest crowding.</p>
+    <p class="sub">Median daily boardings across all LRT + MRT stations. The busiest day is highlighted; the thin gray whisker on each bar shows the min–max range across every observed date, so you can see how much a given weekday actually varies week to week.</p>
     <div class="filter-row">
       <label for="line-select">Line</label>
       <select id="line-select">
@@ -148,6 +154,14 @@
       </select>
     </div>
     <div class="viz-root chart-wrap" id="main-chart-wrap"></div>
+  </div>
+
+  <div class="panel">
+    <h2>CBD-core vs. residential/suburban stations</h2>
+    <p class="sub">The network-wide total blends commute trips with everything else, which can hide a weekday's true shape. This compares a small hand-picked set of CBD-core stations (KLCC, KL Sentral, Pasar Seni, Masjid Jamek, Bukit Bintang, Ampang Park, Dang Wangi, Merdeka, TRX) against outer residential/suburban termini (Ampang, Gombak, Kajang, Kwasa Damansara, Puchong Prima, Putra Heights) — a manual pick based on station identity, not an official land-use dataset.</p>
+    <div class="legend-row" id="zone-legend"></div>
+    <div class="viz-root chart-wrap" id="zone-chart-wrap"></div>
+    <p class="sub" id="zone-takeaway" style="margin:12px 0 0;"></p>
   </div>
 
   <div class="panel">
@@ -205,7 +219,8 @@ function renderWeekdayChart(container, rows, highlightDay) {
   const W = 640, H = 240, marginLeft = 46, marginBottom = 28, marginTop = 16, marginRight = 10;
   const plotW = W - marginLeft - marginRight;
   const plotH = H - marginTop - marginBottom;
-  const maxVal = niceMax(Math.max(...data.map(d => d.median_ridership)) * 1.08);
+  const peak = Math.max(...data.map(d => Math.max(d.median_ridership, d.max_ridership || 0)));
+  const maxVal = niceMax(peak * 1.08);
   const barSlot = plotW / data.length;
   const barW = Math.min(24, barSlot * 0.55);
 
@@ -264,6 +279,30 @@ function renderWeekdayChart(container, rows, highlightDay) {
     rect.setAttribute("class", "bar" + (isHighlight ? " highlight" : ""));
     svg.appendChild(rect);
 
+    if (d.min_ridership != null && d.max_ridership != null) {
+      const whiskerX = x + barW / 2;
+      const yMin = marginTop + plotH - (d.min_ridership / maxVal) * plotH;
+      const yMax = marginTop + plotH - (d.max_ridership / maxVal) * plotH;
+      const whisker = document.createElementNS(svgNS, "line");
+      whisker.setAttribute("x1", whiskerX);
+      whisker.setAttribute("x2", whiskerX);
+      whisker.setAttribute("y1", yMin);
+      whisker.setAttribute("y2", yMax);
+      whisker.setAttribute("stroke", "var(--text-muted)");
+      whisker.setAttribute("stroke-width", "1.5");
+      svg.appendChild(whisker);
+      for (const yCap of [yMin, yMax]) {
+        const cap = document.createElementNS(svgNS, "line");
+        cap.setAttribute("x1", whiskerX - 4);
+        cap.setAttribute("x2", whiskerX + 4);
+        cap.setAttribute("y1", yCap);
+        cap.setAttribute("y2", yCap);
+        cap.setAttribute("stroke", "var(--text-muted)");
+        cap.setAttribute("stroke-width", "1.5");
+        svg.appendChild(cap);
+      }
+    }
+
     if (isHighlight) {
       const valueLabel = document.createElementNS(svgNS, "text");
       valueLabel.setAttribute("x", x + barW / 2);
@@ -306,6 +345,12 @@ function renderWeekdayChart(container, rows, highlightDay) {
     l.textContent = d.weekday_name + (d.avg_ridership ? ` · avg ${fmtNum(d.avg_ridership)}` : "");
     tooltip.appendChild(t);
     tooltip.appendChild(l);
+    if (d.min_ridership != null && d.max_ridership != null) {
+      const r = document.createElement("div");
+      r.className = "t-label";
+      r.textContent = `range ${fmtNum(d.min_ridership)}–${fmtNum(d.max_ridership)} across ${d.n_days_observed} days`;
+      tooltip.appendChild(r);
+    }
     const pct = cx / W;
     tooltip.style.left = `calc(${(pct * 100).toFixed(1)}% )`;
     tooltip.style.top = `${(top / H) * 100}%`;
@@ -316,6 +361,154 @@ function renderWeekdayChart(container, rows, highlightDay) {
 
   container.appendChild(svg);
   container.appendChild(tooltip);
+}
+
+// Renders a grouped bar chart comparing two zones, each indexed to its own
+// Mon-Fri average = 100. Indexing (not raw values) is what makes the two zones
+// comparable on one shared axis despite CBD-core volume being ~6x residential.
+function renderZoneChart(container, cbdRows, residentialRows) {
+  container.innerHTML = "";
+  const byDay = arr => Object.fromEntries(arr.map(r => [r.weekday_name, r]));
+  const cbdByDay = byDay(cbdRows), resByDay = byDay(residentialRows);
+  const cbdAvg = WEEKDAYS.reduce((s, d) => s + cbdByDay[d].median_ridership, 0) / WEEKDAYS.length;
+  const resAvg = WEEKDAYS.reduce((s, d) => s + resByDay[d].median_ridership, 0) / WEEKDAYS.length;
+
+  const data = WEEKDAYS.map(d => ({
+    weekday_name: d,
+    cbd_index: (cbdByDay[d].median_ridership / cbdAvg) * 100,
+    res_index: (resByDay[d].median_ridership / resAvg) * 100,
+  }));
+
+  const W = 640, H = 240, marginLeft = 40, marginBottom = 28, marginTop = 16, marginRight = 10;
+  const plotW = W - marginLeft - marginRight;
+  const plotH = H - marginTop - marginBottom;
+  const maxVal = Math.max(115, Math.max(...data.flatMap(d => [d.cbd_index, d.res_index])) * 1.08);
+  const minVal = Math.min(85, Math.min(...data.flatMap(d => [d.cbd_index, d.res_index])) * 0.92);
+  const range = maxVal - minVal;
+  const yFor = v => marginTop + plotH - ((v - minVal) / range) * plotH;
+
+  const barSlot = plotW / data.length;
+  const barW = Math.min(18, barSlot * 0.28);
+  const gap = 4;
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", "100%");
+  svg.style.overflow = "visible";
+
+  [minVal, (minVal + maxVal) / 2, maxVal].forEach(val => {
+    const y = yFor(val);
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", marginLeft); line.setAttribute("x2", W - marginRight);
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("class", "gridline");
+    svg.appendChild(line);
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", marginLeft - 8); label.setAttribute("y", y + 4);
+    label.setAttribute("text-anchor", "end"); label.setAttribute("class", "axis-label");
+    label.textContent = Math.round(val);
+    svg.appendChild(label);
+  });
+
+  // Reference line at 100 = that zone's own Mon-Fri average.
+  const refY = yFor(100);
+  const ref = document.createElementNS(svgNS, "line");
+  ref.setAttribute("x1", marginLeft); ref.setAttribute("x2", W - marginRight);
+  ref.setAttribute("y1", refY); ref.setAttribute("y2", refY);
+  ref.setAttribute("stroke", "var(--baseline)"); ref.setAttribute("stroke-width", "1");
+  svg.appendChild(ref);
+
+  const tooltip = document.createElement("div");
+  container.style.position = "relative";
+  tooltip.className = "tooltip";
+
+  data.forEach((d, i) => {
+    const groupX = marginLeft + i * barSlot + barSlot / 2;
+    const bars = [
+      { key: "cbd_index", cls: "cbd", x: groupX - barW - gap / 2, label: "CBD core" },
+      { key: "res_index", cls: "residential", x: groupX + gap / 2, label: "Residential/suburban" },
+    ];
+    bars.forEach(b => {
+      const val = d[b.key];
+      const y = yFor(Math.max(val, 100));
+      const yBase = yFor(100);
+      const top = Math.min(y, yBase), h = Math.max(Math.abs(yBase - y), 1);
+      const rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", b.x); rect.setAttribute("y", top);
+      rect.setAttribute("width", barW); rect.setAttribute("height", h);
+      rect.setAttribute("rx", 3);
+      rect.setAttribute("fill", `var(--series-${b.cls})`);
+      svg.appendChild(rect);
+
+      const hit = document.createElementNS(svgNS, "rect");
+      hit.setAttribute("x", b.x - 2); hit.setAttribute("y", marginTop);
+      hit.setAttribute("width", barW + 4); hit.setAttribute("height", plotH);
+      hit.setAttribute("fill", "transparent"); hit.setAttribute("tabindex", "0");
+      hit.style.cursor = "pointer";
+      const show = () => {
+        tooltip.innerHTML = "";
+        const t = document.createElement("div"); t.className = "t-value";
+        t.textContent = `${val.toFixed(1)}% of ${b.label.toLowerCase()}'s Mon-Fri avg`;
+        const l = document.createElement("div"); l.className = "t-label";
+        l.textContent = d.weekday_name;
+        tooltip.appendChild(t); tooltip.appendChild(l);
+        tooltip.style.left = `${((b.x + barW / 2) / W * 100).toFixed(1)}%`;
+        tooltip.style.top = `${(top / H) * 100}%`;
+        tooltip.style.transform = "translate(-50%, -110%)";
+        tooltip.style.opacity = "1";
+      };
+      hit.addEventListener("pointerenter", show);
+      hit.addEventListener("focus", show);
+      hit.addEventListener("pointerleave", () => tooltip.style.opacity = "0");
+      hit.addEventListener("blur", () => tooltip.style.opacity = "0");
+      svg.appendChild(hit);
+    });
+
+    const dayLabel = document.createElementNS(svgNS, "text");
+    dayLabel.setAttribute("x", groupX); dayLabel.setAttribute("y", H - 8);
+    dayLabel.setAttribute("text-anchor", "middle"); dayLabel.setAttribute("class", "weekday-label");
+    dayLabel.textContent = d.weekday_name.slice(0, 3);
+    svg.appendChild(dayLabel);
+  });
+
+  container.appendChild(svg);
+  container.appendChild(tooltip);
+}
+
+function renderZoneLegend() {
+  const el = document.getElementById("zone-legend");
+  el.innerHTML = "";
+  [["CBD core", "var(--series-cbd)"], ["Residential/suburban", "var(--series-residential)"]].forEach(([label, color]) => {
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = color;
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(label));
+    el.appendChild(item);
+  });
+}
+
+async function loadZoneChart() {
+  const data = await fetch(`${API}/api/weekday-summary/by-zone`).then(r => r.json());
+  const cbdRows = data.zones.filter(z => z.zone === "CBD core");
+  const resRows = data.zones.filter(z => z.zone === "Residential/suburban");
+  renderZoneChart(document.getElementById("zone-chart-wrap"), cbdRows, resRows);
+  renderZoneLegend();
+
+  const cbdFri = cbdRows.find(r => r.weekday_name === "Friday");
+  const cbdWed = cbdRows.find(r => r.weekday_name === "Wednesday");
+  const resFri = resRows.find(r => r.weekday_name === "Friday");
+  const resMon = resRows.find(r => r.weekday_name === "Monday");
+  const cbdBusiest = cbdRows.find(r => r.busiest_rank === 1);
+  const resBusiest = resRows.find(r => r.busiest_rank === 1);
+  document.getElementById("zone-takeaway").textContent =
+    `CBD-core stations peak on ${cbdBusiest.weekday_name}; residential/suburban stations peak on ${resBusiest.weekday_name}` +
+    (cbdBusiest.weekday_name !== resBusiest.weekday_name
+      ? " — the network-wide average blends these two different shapes into one."
+      : ".");
 }
 
 async function loadMainChart(lineName) {
@@ -395,6 +588,7 @@ loadMainChart(null);
 loadLines();
 loadStations();
 loadStatus();
+loadZoneChart();
 </script>
 </body>
 </html>

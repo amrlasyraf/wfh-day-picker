@@ -41,7 +41,7 @@ def weekday_summary():
     rows = con.execute(
         """
         SELECT weekday_name, avg_ridership, median_ridership, min_ridership, max_ridership,
-               n_days_observed, busiest_rank
+               stddev_ridership, coeff_variation_pct, n_days_observed, busiest_rank
         FROM gold.weekday_summary
         ORDER BY weekday_num
         """
@@ -137,6 +137,24 @@ def commute_summary(origin_code: str, destination_code: str):
         "destination_code": destination_code,
         "weekdays": [dict(zip(cols, r)) for r in rows],
         "recommended_wfh_day": recommended,
+    }
+
+
+@app.get("/api/weekday-summary/by-zone")
+def weekday_summary_by_zone():
+    con = get_con()
+    rows = con.execute(
+        """
+        SELECT zone, weekday_name, avg_ridership, median_ridership, range_pct_of_avg, busiest_rank
+        FROM gold.weekday_summary_by_zone
+        ORDER BY zone, weekday_num
+        """
+    ).fetchall()
+    cols = [d[0] for d in con.description]
+    con.close()
+    return {
+        "zones": [dict(zip(cols, r)) for r in rows],
+        "note": "CBD core / Residential-suburban are a small hand-picked set of well-known stations (see ingestion/config.py), not derived from any land-use dataset -- illustrative, not authoritative.",
     }
 
 
