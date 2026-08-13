@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WFH Day Picker</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a23;
+    --panel-border: #223041;
+    --text: #e6edf3;
+    --text-dim: #8b98a5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header { padding: 20px 24px 12px; border-bottom: 1px solid var(--panel-border); }
+  header h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  header p { margin: 0; color: var(--text-dim); font-size: 0.85rem; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 24px 60px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+  }
+  .panel .sub { color: var(--text-dim); font-size: 0.8rem; margin: 0 0 16px; }
+
+  .callout {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 10px;
+    background: #2a1f10;
+    border: 1px solid #4d3a12;
+    margin-bottom: 20px;
+  }
+  .callout .label { font-size: 0.78rem; color: #e8a95c; text-transform: uppercase; letter-spacing: 0.04em; }
+  .callout .day { font-size: 1.6rem; font-weight: 600; color: #ffd9a6; }
+  .callout .detail { color: var(--text-dim); font-size: 0.82rem; flex: 1; text-align: right; }
+
+  .filter-row { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  .filter-row label { font-size: 0.78rem; color: var(--text-dim); }
+  .filter-row select {
+    background: #0f151c;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+  .filter-row button {
+    background: #3987e5;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .filter-row button:disabled { opacity: 0.5; cursor: default; }
+
+  /* --- viz-root: tokens scoped to chart internals, per dataviz reference palette --- */
+  .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --series-base: #3987e5;
+    --series-highlight: #d95926;
+  }
+  .chart-wrap { position: relative; }
+  .bar { fill: var(--series-base); }
+  .bar.highlight { fill: var(--series-highlight); }
+  .bar:hover, .bar:focus { filter: brightness(1.15); outline: none; }
+  .bar-hit { fill: transparent; cursor: pointer; }
+  .axis-label { fill: var(--text-muted); font-size: 11px; }
+  .weekday-label { fill: var(--text-secondary); font-size: 12px; }
+  .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: #0f151c;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.78rem;
+    color: var(--text);
+    opacity: 0;
+    transition: opacity 0.1s;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  .tooltip .t-value { font-weight: 700; font-size: 0.9rem; }
+  .tooltip .t-label { color: var(--text-dim); }
+
+  .commute-picker { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+  .commute-picker .field { display: flex; flex-direction: column; gap: 4px; }
+  .commute-picker input {
+    background: #0f151c;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    width: 220px;
+  }
+  #commute-empty { color: var(--text-dim); font-size: 0.85rem; }
+  #status { font-size: 0.75rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>WFH Day Picker</h1>
+  <p>Which weekday is Klang Valley LRT/MRT busiest? Built on 3+ years of official daily ridership data.</p>
+</header>
+<main>
+  <div class="callout" id="callout">
+    <span class="label">Recommended WFH day</span>
+    <span class="day" id="rec-day">…</span>
+    <span class="detail" id="rec-detail"></span>
+  </div>
+
+  <div class="panel">
+    <h2>Network-wide ridership by day of week</h2>
+    <p class="sub">Median daily boardings across all LRT + MRT stations. The busiest day is highlighted — staying home that day avoids the network's heaviest crowding.</p>
+    <div class="filter-row">
+      <label for="line-select">Line</label>
+      <select id="line-select">
+        <option value="">All lines (network-wide)</option>
+      </select>
+    </div>
+    <div class="viz-root chart-wrap" id="main-chart-wrap"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Your specific commute</h2>
+    <p class="sub">Pick your usual origin and destination stations to see the day-of-week pattern for that exact route rather than the network average.</p>
+    <div class="commute-picker">
+      <div class="field">
+        <label for="origin-input">From</label>
+        <input id="origin-input" list="station-list" placeholder="e.g. KLCC" />
+      </div>
+      <div class="field">
+        <label for="destination-input">To</label>
+        <input id="destination-input" list="station-list" placeholder="e.g. Bangsar" />
+      </div>
+      <datalist id="station-list"></datalist>
+      <button id="commute-btn">Show pattern</button>
+    </div>
+    <div id="commute-empty">Enter both stations above to see your commute's day-of-week pattern.</div>
+    <div class="viz-root chart-wrap" id="commute-chart-wrap"></div>
+  </div>
+
+  <div id="status"></div>
+</main>
+
+<script>
+const API = "";
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+let stationsByName = {};
+
+function fmtNum(n) {
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K";
+  return String(Math.round(n));
+}
+
+function niceMax(max) {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(max)));
+  const steps = [1, 2, 2.5, 5, 10];
+  for (const s of steps) {
+    if (max <= s * magnitude) return s * magnitude;
+  }
+  return 10 * magnitude;
+}
+
+// Renders a weekday bar chart (Mon-Fri) into `container`.
+// rows: [{weekday_name, median_ridership, avg_ridership}], highlightDay: weekday name to accent.
+function renderWeekdayChart(container, rows, highlightDay) {
+  container.innerHTML = "";
+  const byDay = Object.fromEntries(rows.map(r => [r.weekday_name, r]));
+  const data = WEEKDAYS.map(d => byDay[d]).filter(Boolean);
+  if (data.length === 0) {
+    container.innerHTML = '<p style="color:var(--text-dim);font-size:0.85rem;">No data.</p>';
+    return;
+  }
+
+  const W = 640, H = 240, marginLeft = 46, marginBottom = 28, marginTop = 16, marginRight = 10;
+  const plotW = W - marginLeft - marginRight;
+  const plotH = H - marginTop - marginBottom;
+  const maxVal = niceMax(Math.max(...data.map(d => d.median_ridership)) * 1.08);
+  const barSlot = plotW / data.length;
+  const barW = Math.min(24, barSlot * 0.55);
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", "100%");
+  svg.style.overflow = "visible";
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const val = (maxVal / ticks) * i;
+    const y = marginTop + plotH - (val / maxVal) * plotH;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", marginLeft);
+    line.setAttribute("x2", W - marginRight);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    line.setAttribute("class", "gridline");
+    svg.appendChild(line);
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", marginLeft - 8);
+    label.setAttribute("y", y + 4);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("class", "axis-label");
+    label.textContent = fmtNum(val);
+    svg.appendChild(label);
+  }
+
+  const baseline = document.createElementNS(svgNS, "line");
+  baseline.setAttribute("x1", marginLeft);
+  baseline.setAttribute("x2", W - marginRight);
+  baseline.setAttribute("y1", marginTop + plotH);
+  baseline.setAttribute("y2", marginTop + plotH);
+  baseline.setAttribute("stroke", "var(--baseline)");
+  baseline.setAttribute("stroke-width", "1");
+  svg.appendChild(baseline);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "tooltip";
+  container.style.position = "relative";
+
+  data.forEach((d, i) => {
+    const isHighlight = d.weekday_name === highlightDay;
+    const barH = (d.median_ridership / maxVal) * plotH;
+    const x = marginLeft + i * barSlot + (barSlot - barW) / 2;
+    const y = marginTop + plotH - barH;
+
+    const rect = document.createElementNS(svgNS, "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", barW);
+    rect.setAttribute("height", Math.max(barH, 1));
+    rect.setAttribute("rx", 4);
+    rect.setAttribute("class", "bar" + (isHighlight ? " highlight" : ""));
+    svg.appendChild(rect);
+
+    if (isHighlight) {
+      const valueLabel = document.createElementNS(svgNS, "text");
+      valueLabel.setAttribute("x", x + barW / 2);
+      valueLabel.setAttribute("y", y - 8);
+      valueLabel.setAttribute("text-anchor", "middle");
+      valueLabel.setAttribute("class", "value-label");
+      valueLabel.textContent = fmtNum(d.median_ridership);
+      svg.appendChild(valueLabel);
+    }
+
+    const dayLabel = document.createElementNS(svgNS, "text");
+    dayLabel.setAttribute("x", marginLeft + i * barSlot + barSlot / 2);
+    dayLabel.setAttribute("y", H - 8);
+    dayLabel.setAttribute("text-anchor", "middle");
+    dayLabel.setAttribute("class", "weekday-label");
+    dayLabel.textContent = d.weekday_name.slice(0, 3);
+    svg.appendChild(dayLabel);
+
+    const hit = document.createElementNS(svgNS, "rect");
+    hit.setAttribute("x", marginLeft + i * barSlot);
+    hit.setAttribute("y", marginTop);
+    hit.setAttribute("width", barSlot);
+    hit.setAttribute("height", plotH);
+    hit.setAttribute("class", "bar-hit");
+    hit.setAttribute("tabindex", "0");
+    hit.addEventListener("pointerenter", () => showTooltip(d, x + barW / 2, y));
+    hit.addEventListener("focus", () => showTooltip(d, x + barW / 2, y));
+    hit.addEventListener("pointerleave", hideTooltip);
+    hit.addEventListener("blur", hideTooltip);
+    svg.appendChild(hit);
+  });
+
+  function showTooltip(d, cx, top) {
+    tooltip.innerHTML = "";
+    const t = document.createElement("div");
+    t.className = "t-value";
+    t.textContent = fmtNum(d.median_ridership) + " trips (median)";
+    const l = document.createElement("div");
+    l.className = "t-label";
+    l.textContent = d.weekday_name + (d.avg_ridership ? ` · avg ${fmtNum(d.avg_ridership)}` : "");
+    tooltip.appendChild(t);
+    tooltip.appendChild(l);
+    const pct = cx / W;
+    tooltip.style.left = `calc(${(pct * 100).toFixed(1)}% )`;
+    tooltip.style.top = `${(top / H) * 100}%`;
+    tooltip.style.transform = "translate(-50%, -110%)";
+    tooltip.style.opacity = "1";
+  }
+  function hideTooltip() { tooltip.style.opacity = "0"; }
+
+  container.appendChild(svg);
+  container.appendChild(tooltip);
+}
+
+async function loadMainChart(lineName) {
+  const url = lineName
+    ? `${API}/api/weekday-summary/by-line?line_name=${encodeURIComponent(lineName)}`
+    : `${API}/api/weekday-summary`;
+  const data = await fetch(url).then(r => r.json());
+  const rows = lineName ? data : data.weekdays;
+  const highlight = lineName
+    ? rows.slice().sort((a, b) => b.median_ridership - a.median_ridership)[0]?.weekday_name
+    : data.recommended_wfh_day;
+  renderWeekdayChart(document.getElementById("main-chart-wrap"), rows, highlight);
+
+  if (!lineName) {
+    document.getElementById("rec-day").textContent = data.recommended_wfh_day;
+    document.getElementById("rec-detail").textContent = data.note;
+  }
+}
+
+async function loadLines() {
+  const lines = await fetch(`${API}/api/lines`).then(r => r.json());
+  const select = document.getElementById("line-select");
+  for (const l of lines) {
+    const opt = document.createElement("option");
+    opt.value = l.line_name;
+    opt.textContent = l.line_name;
+    select.appendChild(opt);
+  }
+  select.addEventListener("change", () => loadMainChart(select.value || null));
+}
+
+async function loadStations() {
+  const stations = await fetch(`${API}/api/stations`).then(r => r.json());
+  const list = document.getElementById("station-list");
+  for (const s of stations) {
+    stationsByName[s.name.toLowerCase()] = s.code;
+    const opt = document.createElement("option");
+    opt.value = s.name;
+    list.appendChild(opt);
+  }
+}
+
+async function showCommute() {
+  const originName = document.getElementById("origin-input").value.trim().toLowerCase();
+  const destName = document.getElementById("destination-input").value.trim().toLowerCase();
+  const originCode = stationsByName[originName];
+  const destCode = stationsByName[destName];
+  const emptyEl = document.getElementById("commute-empty");
+  const chartWrap = document.getElementById("commute-chart-wrap");
+
+  if (!originCode || !destCode) {
+    emptyEl.textContent = "Couldn't match one of those station names — pick from the suggestions list.";
+    emptyEl.style.display = "block";
+    chartWrap.innerHTML = "";
+    return;
+  }
+
+  const data = await fetch(`${API}/api/commute-summary?origin_code=${originCode}&destination_code=${destCode}`).then(r => r.json());
+  if (data.weekdays.length === 0) {
+    emptyEl.textContent = "No ridership recorded between these two stations.";
+    emptyEl.style.display = "block";
+    chartWrap.innerHTML = "";
+    return;
+  }
+  emptyEl.style.display = "none";
+  renderWeekdayChart(chartWrap, data.weekdays, data.recommended_wfh_day);
+}
+
+async function loadStatus() {
+  const h = await fetch(`${API}/api/health`).then(r => r.json());
+  document.getElementById("status").textContent =
+    `API healthy · ${h.days_observed} days observed · ${h.date_range[0]} to ${h.date_range[1]}`;
+}
+
+document.getElementById("commute-btn").addEventListener("click", showCommute);
+loadMainChart(null);
+loadLines();
+loadStations();
+loadStatus();
+</script>
+</body>
+</html>
